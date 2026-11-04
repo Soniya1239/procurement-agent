@@ -1,0 +1,129 @@
+{
+  "vendors": {
+    "TechNova": {
+      "name": "TechNova",
+      "shippingFlat": 12.99,
+      "deliveryDays": 3
+    },
+    "KeyCraft Supply": {
+      "name": "KeyCraft Supply",
+      "shippingFlat": 9.99,
+      "deliveryDays": 5
+    },
+    "OfficeHub": {
+      "name": "OfficeHub",
+      "shippingFlat": 7.99,
+      "deliveryDays": 2
+    }
+  },
+  "products": [
+    {
+      "sku": "TN-KB-001",
+      "name": "TechNova Pro Mechanical",
+      "vendor": "TechNova",
+      "category": "mechanical_keyboard",
+      "price": 49.99,
+      "stock": 25,
+      "rating": 4.5
+    },
+    {
+      "sku": "TN-KB-002",
+      "name": "TechNova RGB Gaming",
+      "vendor": "TechNova",
+      "category": "mechanical_keyboard",
+      "price": 69.99,
+      "stock": 15,
+      "rating": 4.8
+    },
+    {
+      "sku": "TN-MS-001",
+      "name": "TechNova Wireless Mouse",
+      "vendor": "TechNova",
+      "category": "wireless_mouse",
+      "price": 24.99,
+      "stock": 50,
+      "rating": 4.2
+    },
+    {
+      "sku": "TN-MS-002",
+      "name": "TechNova Ergo Mouse",
+      "vendor": "TechNova",
+      "category": "wireless_mouse",
+      "price": 34.99,
+      "stock": 8,
+      "rating": 4.6
+    },
+    {
+      "sku": "KC-KB-001",
+      "name": "KeyCraft Compact 65",
+      "vendor": "KeyCraft Supply",
+      "category": "mechanical_keyboard",
+      "price": 59.99,
+      "stock": 20,
+      "rating": 4.7
+    },
+    {
+      "sku": "KC-KB-002",
+      "name": "KeyCraft Premium",
+      "vendor": "KeyCraft Supply",
+      "category": "mechanical_keyboard",
+      "price": 89.99,
+      "stock": 3,
+      "rating": 4.9
+    },
+    {
+      "sku": "KC-MS-001",
+      "name": "KeyCraft Precision",
+      "vendor": "KeyCraft Supply",
+      "category": "wireless_mouse",
+      "price": 29.99,
+      "stock": 30,
+      "rating": 4.4
+    },
+    {
+      "sku": "KC-MS-002",
+      "name": "KeyCraft Ultra",
+      "vendor": "KeyCraft Supply",
+      "category": "wireless_mouse",
+      "price": 44.99,
+      "stock": 12,
+      "rating": 4.8
+    },
+    {
+      "sku": "OH-KB-001",
+      "name": "OfficeHub Standard",
+      "vendor": "OfficeHub",
+      "category": "mechanical_keyboard",
+      "price": 39.99,
+      "stock": 40,
+      "rating": 3.8
+    },
+    {
+      "sku": "OH-KB-002",
+      "name": "OfficeHub Quiet Pro",
+      "vendor": "OfficeHub",
+      "category": "mechanical_keyboard",
+      "price": 54.99,
+      "stock": 18,
+      "rating": 4.3
+    },
+    {
+      "sku": "OH-MS-001",
+      "name": "OfficeHub Basic Mouse",
+      "vendor": "OfficeHub",
+      "category": "wireless_mouse",
+      "price": 19.99,
+      "stock": 2,
+      "rating": 3.5
+    },
+    {
+      "sku": "OH-MS-002",
+      "name": "OfficeHub Comfort",
+      "vendor": "OfficeHub",
+      "category": "wireless_mouse",
+      "price": 27.99,
+      "stock": 35,
+      "rating": 4.1
+    }
+  ]
+}
