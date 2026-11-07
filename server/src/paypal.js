@@ -85,6 +85,7 @@ export async function createOrder({ items, total, shipping, currency = 'USD' }) 
       return_url: `${process.env.APP_BASE_URL}/success`,
       cancel_url: `${process.env.APP_BASE_URL}/cancel`,
       user_action: 'PAY_NOW',
+      brand_name: 'ProcureAI',
       payment_source: {
         experience: {
           user_action: 'PAY_NOW'
@@ -93,7 +94,7 @@ export async function createOrder({ items, total, shipping, currency = 'USD' }) 
     }
   };
 
-  console.log('PayPal create order payload:', JSON.stringify(payload, null, 2));
+  console.log(`PayPal order created: total $${formatAmount(total)}, ${items.length} item(s)`);
 
   const response = await fetch(`${process.env.PAYPAL_BASE_URL}/v2/checkout/orders`, {
     method: 'POST',

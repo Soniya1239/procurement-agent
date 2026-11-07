@@ -1,12 +1,47 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createOrder, captureOrder, getAccessToken } from './paypal.js';
 import { processProcurementRequest } from './agent.js';
 import { getQuote } from './mcpClient.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// Load orders from file on startup
+let orders = [];
+if (fs.existsSync(ORDERS_FILE)) {
+  try {
+    const data = fs.readFileSync(ORDERS_FILE, 'utf8');
+    orders = JSON.parse(data);
+    console.log(`Loaded ${orders.length} orders from ${ORDERS_FILE}`);
+  } catch (err) {
+    console.error('Failed to load orders from file:', err);
+    orders = [];
+  }
+}
+
+// Save orders to file
+function saveOrders() {
+  try {
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
+  } catch (err) {
+    console.error('Failed to save orders to file:', err);
+  }
+}
+
 // Startup check for required environment variables
-const requiredEnvVars = ['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET', 'PAYPAL_BASE_URL', 'LLM_API_KEY', 'APP_BASE_URL'];
+const requiredEnvVars = ['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET', 'PAYPAL_BASE_URL', 'GEMINI_API_KEY', 'APP_BASE_URL'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
 if (missingEnvVars.length > 0) {
@@ -17,12 +52,11 @@ if (missingEnvVars.length > 0) {
 }
 
 console.log('✅ All required environment variables are set');
-const llmKeyLoaded = !!process.env.LLM_API_KEY;
-console.log(`🔑 LLM key loaded: ${llmKeyLoaded}, length: ${process.env.LLM_API_KEY?.length || 0}`);
-console.log(`🤖 Using Gemini model: ${process.env.LLM_MODEL || 'gemini-1.5-flash (default)'}`);
-
-// In-memory order log
-const orders = [];
+const geminiKeyLoaded = !!process.env.GEMINI_API_KEY || !!process.env.LLM_API_KEY;
+const geminiKey = process.env.GEMINI_API_KEY || process.env.LLM_API_KEY;
+console.log(`🔑 Gemini key loaded: ${geminiKeyLoaded}, length: ${geminiKey?.length || 0}`);
+console.log(`🤖 Primary model: ${process.env.GEMINI_PRIMARY_MODEL || 'gemini-3.5-flash (default)'}`);
+console.log(`🤖 Fallback model: ${process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest (default)'}`);
 
 // In-memory duplicate request protection (plan fingerprint -> timestamp)
 const recentCheckoutRequests = new Map();
@@ -51,21 +85,43 @@ app.get('/api/health', (req, res) => {
 
 // Capture order endpoint
 app.post('/api/capture/:orderId', async (req, res) => {
+  const { orderId } = req.params;
+  const clientId = req.headers['x-client-id'];
+  
   try {
-    const { orderId } = req.params;
-    
     // Check if order is already captured (idempotency)
     const existingOrder = orders.find(o => o.orderId === orderId && o.status === 'COMPLETED');
     if (existingOrder) {
-      console.log(`Order ${orderId} already captured, returning stored result`);
-      return res.json(existingOrder);
+      // Return normalized capture response with all required fields
+      const normalizedResponse = {
+        orderId: existingOrder.orderId,
+        captureId: existingOrder.captureId,
+        status: existingOrder.status,
+        capturedAt: existingOrder.capturedAt,
+        grandTotal: existingOrder.grandTotal,
+        amountPaid: existingOrder.amountPaid,
+        currency: 'USD',
+        payerName: existingOrder.payerName,
+        payerEmail: existingOrder.payerEmail,
+        items: existingOrder.items,
+        itemsTotal: existingOrder.itemsTotal,
+        shipping: existingOrder.shipping
+      };
+      return res.json(normalizedResponse);
     }
     
     const result = await captureOrder(orderId);
     
     // Update order status in history
     const orderIndex = orders.findIndex(o => o.orderId === orderId);
+    
     if (orderIndex !== -1) {
+      // Ensure clientId matches for security
+      if (clientId && orders[orderIndex].clientId && orders[orderIndex].clientId !== clientId) {
+        console.warn(`ClientId mismatch for order ${orderId}, denying capture`);
+        return res.status(403).json({ error: 'Order does not belong to this client' });
+      }
+      
       orders[orderIndex].status = 'COMPLETED';
       orders[orderIndex].capturedAt = new Date().toISOString();
       orders[orderIndex].captureResult = result;
@@ -84,6 +140,8 @@ app.post('/api/capture/:orderId', async (req, res) => {
         orders[orderIndex].payerEmail = result.payer.email_address;
       }
       
+      saveOrders();
+      
       // Return the full order record with capture details
       return res.json(orders[orderIndex]);
     }
@@ -101,7 +159,7 @@ app.post('/api/capture/:orderId', async (req, res) => {
       // Try to fetch order details from PayPal
       try {
         const token = await getAccessToken();
-        const orderResponse = await fetch(`${process.env.PAYPAL_BASE_URL}/v2/checkout/orders/${req.params.orderId}`, {
+        const orderResponse = await fetch(`${process.env.PAYPAL_BASE_URL}/v2/checkout/orders/${orderId}`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -113,8 +171,14 @@ app.post('/api/capture/:orderId', async (req, res) => {
           const orderDetails = await orderResponse.json();
           
           // Find and update our order record
-          const orderIndex = orders.findIndex(o => o.orderId === req.params.orderId);
+          const orderIndex = orders.findIndex(o => o.orderId === orderId);
           if (orderIndex !== -1) {
+            // Ensure clientId matches for security
+            if (clientId && orders[orderIndex].clientId && orders[orderIndex].clientId !== clientId) {
+              console.warn(`ClientId mismatch for order ${orderId}, denying capture`);
+              return res.status(403).json({ error: 'Order does not belong to this client' });
+            }
+            
             orders[orderIndex].status = 'COMPLETED';
             orders[orderIndex].capturedAt = new Date().toISOString();
             orders[orderIndex].captureResult = orderDetails;
@@ -132,13 +196,14 @@ app.post('/api/capture/:orderId', async (req, res) => {
               orders[orderIndex].payerEmail = orderDetails.payer.email_address;
             }
             
+            saveOrders();
             return res.json(orders[orderIndex]);
           }
           
           return res.json(orderDetails);
         }
       } catch (fetchError) {
-        console.error('Failed to fetch order details after already-captured error:', fetchError.message);
+        console.error('Failed to fetch order details:', fetchError.message);
       }
     }
     
@@ -150,11 +215,11 @@ app.post('/api/capture/:orderId', async (req, res) => {
 app.post('/api/plan', async (req, res) => {
   try {
     const { command, useSampleData } = req.body;
-    
+
     if (!command) {
       return res.status(400).json({ error: 'Command is required' });
     }
-    
+
     const result = await processProcurementRequest(command, useSampleData);
     res.json(result);
   } catch (error) {
@@ -163,14 +228,50 @@ app.post('/api/plan', async (req, res) => {
   }
 });
 
+// Streaming plan endpoint - emits steps as newline-delimited JSON
+app.post('/api/agent/stream', async (req, res) => {
+  const { command, useSampleData } = req.body;
+
+  if (!command) {
+    return res.status(400).json({ error: 'Command is required' });
+  }
+
+  // Set headers for streaming response
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const sendLine = (data) => {
+    res.write(JSON.stringify(data) + '\n');
+  };
+
+  try {
+    const result = await processProcurementRequest(command, useSampleData, (step) => {
+      sendLine({ type: 'step', text: step, time: new Date().toISOString() });
+    });
+
+    sendLine({ type: 'result', ...result });
+    res.end();
+    console.log(`Streaming request completed: ${command.substring(0, 50)}...`);
+  } catch (error) {
+    sendLine({ type: 'error', message: error.message });
+    res.end();
+    console.error('Streaming error:', error);
+  }
+});
+
 // Checkout endpoint - validates plan and creates PayPal order
 app.post('/api/checkout', async (req, res) => {
+  const clientId = req.headers['x-client-id'];
   try {
     const { plan } = req.body;
     
     if (!plan || !plan.best) {
       return res.status(400).json({ error: 'Valid plan is required' });
     }
+
+    console.log(`Checkout: ${plan.best.items.length} items, total $${plan.best.grandTotal.toFixed(2)}`);
 
     // Check for duplicate requests within the window
     const fingerprint = planFingerprint(plan);
@@ -237,15 +338,17 @@ app.post('/api/checkout', async (req, res) => {
     // Log order for history
     const orderRecord = {
       orderId: paypalResult.orderId,
+      clientId: clientId || null,
       items: validatedItems,
-      itemsTotal: itemsTotalCents / 100,
-      shipping: shippingCents / 100,
-      grandTotal: totalCents / 100,
+      itemsTotal: Math.round((itemsTotalCents / 100) * 100) / 100,
+      shipping: Math.round((shippingCents / 100) * 100) / 100,
+      grandTotal: Math.round((totalCents / 100) * 100) / 100,
       vendors: Array.from(distinctVendors),
       status: 'CREATED',
       createdAt: new Date().toISOString()
     };
     orders.push(orderRecord);
+    saveOrders();
 
     res.json({
       approveUrl: paypalResult.approveUrl,
@@ -257,9 +360,31 @@ app.post('/api/checkout', async (req, res) => {
   }
 });
 
-// Get orders endpoint - returns order history
+// Get orders endpoint - returns order history for client
 app.get('/api/orders', (req, res) => {
-  res.json(orders);
+  const clientId = req.headers['x-client-id'];
+  if (!clientId) {
+    return res.json([]);
+  }
+  const clientOrders = orders.filter(order => order.clientId === clientId);
+  res.json(clientOrders);
+});
+
+// Clear orders endpoint - clears order history for client
+app.post('/api/orders/clear', (req, res) => {
+  const clientId = req.headers['x-client-id'];
+  if (!clientId) {
+    return res.json({ success: true, message: 'No client ID provided' });
+  }
+  // Remove only orders matching this client
+  const initialLength = orders.length;
+  for (let i = orders.length - 1; i >= 0; i--) {
+    if (orders[i].clientId === clientId) {
+      orders.splice(i, 1);
+    }
+  }
+  saveOrders();
+  res.json({ success: true, message: 'Order history cleared', cleared: initialLength - orders.length });
 });
 
 // Start server
