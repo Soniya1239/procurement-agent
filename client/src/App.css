@@ -441,7 +441,7 @@ body .dot-grid {
 
 .console-body {
   padding: var(--space-16);
-  height: 340px;
+  height: 300px;
   overflow-y: auto;
   font-size: 14px;
   line-height: 1.6;
@@ -965,7 +965,7 @@ body .dot-grid {
 .section-eyebrow {
   font-size: 13px;
   font-weight: 700;
-  color: var(--eyebrow-on-page);
+  color: #93c5fd;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: var(--space-8);
@@ -1628,13 +1628,30 @@ body .dot-grid {
   flex-shrink: 0;
 }
 
+.vendor-bar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
 .vendor-bar-name {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
-  white-space: normal;
-  overflow: visible;
-  text-overflow: unset;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vendor-bar-vendor {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .vendor-bar-track {

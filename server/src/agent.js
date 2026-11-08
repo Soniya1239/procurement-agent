@@ -618,31 +618,29 @@ export async function processProcurementRequest(userCommand, useSampleData = fal
 
     emitStep(`Best bundle found: $${plan.best.grandTotal.toFixed(2)} total, avg rating ${plan.best.avgRating.toFixed(2)}/5`);
 
-    // Generate explanation asynchronously (don't block the response)
-    // Return immediately with a placeholder, then update via streaming if possible
+    // Generate explanation with 10-second timeout
     let explanation, source;
+    const explanationStartTime = Date.now();
     
-    // Start explanation generation in background
-    const explanationPromise = (async () => {
-      try {
-        const result = await generateExplanation(plan, parsed);
-        return { text: result.text, source: result.explanationSource };
-      } catch (error) {
-        console.log('Explanation generation failed, using template:', error.message);
-        const remainingBudget = Math.round((parsed.budget - plan.best.grandTotal) * 100) / 100;
-        return { 
-          text: `Selected ${plan.best.items.length} items from ${plan.best.vendors.length} vendor(s) with an average rating of ${plan.best.avgRating.toFixed(2)}/5. Total cost is $${plan.best.grandTotal.toFixed(2)} ($${plan.best.itemsTotal.toFixed(2)} for items + $${plan.best.shipping.toFixed(2)} shipping), leaving $${remainingBudget.toFixed(2)} remaining from the $${parsed.budget.toFixed(2)} budget.`,
-          source: 'template'
-        };
-      }
-    })();
+    try {
+      const result = await Promise.race([
+        generateExplanation(plan, parsed),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Explanation timeout')), 10000)
+        )
+      ]);
+      explanation = result.text;
+      source = result.explanationSource;
+      explanationSource = source;
+      console.log(`Explanation generated in ${Date.now() - explanationStartTime}ms, source: ${source}`);
+    } catch (error) {
+      console.log('Explanation generation failed or timed out, using template:', error.message);
+      const remainingBudget = Math.round((parsed.budget - plan.best.grandTotal) * 100) / 100;
+      explanation = `Selected ${plan.best.items.length} items from ${plan.best.vendors.length} vendor(s) with an average rating of ${plan.best.avgRating.toFixed(2)}/5. Total cost is $${plan.best.grandTotal.toFixed(2)} ($${plan.best.itemsTotal.toFixed(2)} for items + $${plan.best.shipping.toFixed(2)} shipping), leaving $${remainingBudget.toFixed(2)} remaining from the $${parsed.budget.toFixed(2)} budget.`;
+      source = 'template';
+      explanationSource = source;
+    }
 
-    // Return immediately with placeholder explanation
-    explanation = 'Loading AI insight...';
-    source = 'pending';
-    explanationSource = source;
-
-    // Store the promise for later resolution (for streaming endpoint)
     const result = {
       parsed,
       quotes,
@@ -650,8 +648,7 @@ export async function processProcurementRequest(userCommand, useSampleData = fal
       explanation,
       explanationSource,
       steps: allSteps,
-      usedFallback,
-      _explanationPromise: explanationPromise
+      usedFallback
     };
 
     return result;

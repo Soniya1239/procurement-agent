@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useSearchParams } from 'react-router-dom';
 import { AgGridReact } from 'ag-grid-react';
 import 'ag-grid-community/styles/ag-grid.css';
@@ -28,8 +28,7 @@ const formatDate = (dateString) => {
     hour: 'numeric', 
     minute: '2-digit',
     hour12: true,
-    timeZone: 'America/New_York',
-    timeZoneName: 'short'
+    timeZone: 'America/New_York'
   });
 };
 
@@ -258,7 +257,7 @@ function DecisionTile({ parsed, plan }) {
               </div>
               <div className="decision-mini-total money-text">{formatMoney(item.lineTotal)}</div>
               <div className="decision-mini-rating">
-                {item.rating.toFixed(2)}
+                {item.rating.toFixed(1)}
                 <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                 </svg>
@@ -490,20 +489,33 @@ function VendorComparisonTile({ quotes, plan, parsed }) {
     }
 
     const selectedItems = plan.best.items || [];
+    const budget = parsed?.budget || plan.best.grandTotal;
+    
+    // Check if item's own total exceeds budget
+    const itemTotal = item.lineTotal + item.shipping;
+    if (itemTotal > budget) {
+      return { text: "Over budget", class: 'over-budget', tooltip: "This item's total exceeds the budget" };
+    }
+
+    // Check if item fits with other selected items
     const otherSelectedTotal = selectedItems
       .filter(si => si.category !== item.category)
       .reduce((sum, si) => sum + si.lineTotal + si.shipping, 0);
     
-    const newTotal = otherSelectedTotal + item.lineTotal + item.shipping;
-    const budget = parsed?.budget || plan.best.grandTotal;
+    const newTotal = otherSelectedTotal + itemTotal;
     
     if (newTotal > budget) {
-      return { text: "Doesn't fit bundle budget", class: 'over-budget', tooltip: "Doesn't fit bundle budget when combined with the selected items" };
+      // Find which category it doesn't fit with
+      const otherCategories = selectedItems
+        .filter(si => si.category !== item.category)
+        .map(si => si.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()));
+      const categoryName = otherCategories[0] || 'other items';
+      return { text: "Doesn't fit", class: 'reason', tooltip: `Doesn't fit with ${categoryName}` };
     }
 
     const selectedItemInCategory = selectedItems.find(si => si.category === item.category);
     if (selectedItemInCategory && item.rating < selectedItemInCategory.rating) {
-      return { text: `Lower rating (${item.rating.toFixed(2)})`, class: 'reason' };
+      return { text: `Lower rating (${item.rating.toFixed(1)})`, class: 'reason' };
     }
 
     return null;
@@ -537,7 +549,7 @@ function VendorComparisonTile({ quotes, plan, parsed }) {
           </div>
           <div className="vendor-legend-item">
             <div className="vendor-legend-color over-budget" />
-            <span title="Doesn't fit bundle budget when combined with the selected items">Doesn't fit bundle budget</span>
+            <span title="Over budget when combined with the selected items">Over budget</span>
           </div>
         </div>
       </div>
@@ -551,7 +563,7 @@ function VendorComparisonTile({ quotes, plan, parsed }) {
             const tagInfo = getTagInfo(item);
             
             return (
-              <div key={idx} className="vendor-bar-row" title={`Unit: ${formatMoney(item.unitPrice)}, Qty: ${item.quantity}, Shipping: ${formatMoney(item.shipping)}, Rating: ${item.rating.toFixed(2)}`}>
+              <div key={idx} className="vendor-bar-row" title={`Unit: ${formatMoney(item.unitPrice)}, Qty: ${item.quantity}, Shipping: ${formatMoney(item.shipping)}, Rating: ${item.rating.toFixed(1)}`}>
                 <div className="vendor-bar-label-col">
                   <div 
                     className="vendor-bar-avatar"
@@ -559,7 +571,10 @@ function VendorComparisonTile({ quotes, plan, parsed }) {
                   >
                     {getVendorInitials(item.vendor)}
                   </div>
-                  <span className="vendor-bar-name">{item.vendor} · {item.name}</span>
+                  <div className="vendor-bar-text">
+                    <span className="vendor-bar-name">{item.name}</span>
+                    <span className="vendor-bar-vendor">{item.vendor}</span>
+                  </div>
                 </div>
                 <div className="vendor-bar-track">
                   <div 
@@ -569,7 +584,7 @@ function VendorComparisonTile({ quotes, plan, parsed }) {
                 </div>
                 <span className="vendor-bar-amount">{formatMoney(total)}</span>
                 <span className="vendor-bar-rating">
-                  {item.rating.toFixed(2)}
+                  {item.rating.toFixed(1)}
                   <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                   </svg>
@@ -803,12 +818,18 @@ function ProcurementPage() {
     setIsStale(false);
 
     try {
-      // Try streaming endpoint first
+      // Try streaming endpoint first with 12-second timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      
       const response = await fetch('http://localhost:3001/api/agent/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command, useSampleData })
+        body: JSON.stringify({ command, useSampleData }),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -868,13 +889,19 @@ function ProcurementPage() {
       console.log('Streaming failed, falling back to non-streaming endpoint:', streamError.message);
       setIsStreaming(false);
 
-      // Fallback to non-streaming endpoint
+      // Fallback to non-streaming endpoint with 12-second timeout
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        
         const response = await fetch('http://localhost:3001/api/plan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command, useSampleData })
+          body: JSON.stringify({ command, useSampleData }),
+          signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -956,14 +983,25 @@ function ProcurementPage() {
       } else if (quote.stock === 0) {
         status = 'Not selected';
       } else {
-        // Check if swapping would exceed budget
-        const otherSelectedTotal = selectedItems
-          .filter(si => si.category !== quote.category)
-          .reduce((sum, si) => sum + si.lineTotal + si.shipping, 0);
-        const newTotal = otherSelectedTotal + quote.lineTotal + quote.shipping;
-        
-        if (newTotal > budget) {
-          status = "Doesn't fit bundle budget";
+        // Check if item's own total exceeds budget
+        const itemTotal = quote.lineTotal + quote.shipping;
+        if (itemTotal > budget) {
+          status = "Over budget";
+        } else {
+          // Check if swapping would exceed budget
+          const otherSelectedTotal = selectedItems
+            .filter(si => si.category !== quote.category)
+            .reduce((sum, si) => sum + si.lineTotal + si.shipping, 0);
+          const newTotal = otherSelectedTotal + itemTotal;
+          
+          if (newTotal > budget) {
+            // Find which category it doesn't fit with
+            const otherCategories = selectedItems
+              .filter(si => si.category !== quote.category)
+              .map(si => si.category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()));
+            const categoryName = otherCategories[0] || 'other items';
+            status = "Doesn't fit";
+          }
         }
       }
       
@@ -992,7 +1030,7 @@ function ProcurementPage() {
   const getShortReason = (reason) => {
     if (reason.includes('stock')) return 'Low stock';
     if (reason.includes('rating')) return 'Low rating';
-    if (reason.includes('budget') || reason.includes("Doesn't fit")) return "Doesn't fit bundle budget";
+    if (reason.includes('budget') || reason.includes("Doesn't fit")) return "Over budget";
     return 'Skipped';
   };
 
@@ -1142,7 +1180,7 @@ function ProcurementPage() {
         if (isNaN(ratingNum)) return '';
         return (
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end', width: '100%', fontSize: '14px', fontWeight: '600' }}>
-            {ratingNum.toFixed(2)}
+            {ratingNum.toFixed(1)}
             <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
             </svg>
@@ -1169,10 +1207,14 @@ function ProcurementPage() {
         if (status === 'Selected') {
           bgColor = '#D1FAE5';
           textColor = '#065F46';
-        } else if (status === "Doesn't fit bundle budget") {
+        } else if (status === "Over budget") {
           bgColor = '#FEF3C7';
           textColor = '#92400E';
-          tooltip = "Doesn't fit bundle budget when combined with the selected items";
+          tooltip = "Over budget when combined with the selected items";
+        } else if (status === "Doesn't fit") {
+          bgColor = '#E0F2FE';
+          textColor = '#0369A1';
+          tooltip = "Fits alone but doesn't fit with the selected bundle";
         } else if (status === 'Not selected') {
           bgColor = '#E2E8F0';
           textColor = '#334155';
@@ -1254,13 +1296,28 @@ function ProcurementPage() {
                 placeholder="Describe what you need and your budget..."
               />
               <div className="command-chips">
-                <button className="command-chip" onClick={() => setCommand('We have a $500 budget. Find 5 mechanical keyboards and 5 wireless mice from our approved vendors.')} disabled={loading || useSampleData}>
+                <button 
+                  className={`command-chip ${useSampleData ? 'disabled' : ''}`} 
+                  onClick={() => setCommand('We have a $500 budget. Find 5 mechanical keyboards and 5 wireless mice from our approved vendors.')} 
+                  disabled={loading || useSampleData}
+                  style={useSampleData ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
+                >
                   Mechanical keyboards + mice
                 </button>
-                <button className="command-chip" onClick={() => setCommand('Need 10 wireless mice with a $200 budget from approved vendors.')} disabled={loading || useSampleData}>
+                <button 
+                  className={`command-chip ${useSampleData ? 'disabled' : ''}`} 
+                  onClick={() => setCommand('Need 10 wireless mice with a $200 budget from approved vendors.')} 
+                  disabled={loading || useSampleData}
+                  style={useSampleData ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
+                >
                   Wireless mice
                 </button>
-                <button className="command-chip" onClick={() => setCommand('Looking for 3 mechanical keyboards under $300 total from approved vendors.')} disabled={loading || useSampleData}>
+                <button 
+                  className={`command-chip ${useSampleData ? 'disabled' : ''}`} 
+                  onClick={() => setCommand('Looking for 3 mechanical keyboards under $300 total from approved vendors.')} 
+                  disabled={loading || useSampleData}
+                  style={useSampleData ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
+                >
                   Mechanical keyboards
                 </button>
               </div>
@@ -1357,7 +1414,7 @@ function ProcurementPage() {
                 <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                 </svg>
-                05 All Quotes
+                03 All Quotes
                 <span className="section-description">Complete quote data</span>
               </div>
               <div className="card grid-card accent">
@@ -1408,7 +1465,7 @@ function ProcurementPage() {
                 <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
-                06 Approve and Pay
+                04 Approve and Pay
                 <span className="section-description">Secure checkout</span>
               </div>
               <div className="payment-card accent">
@@ -1528,7 +1585,7 @@ function ProcurementPage() {
                       {data.plan.rejected.map((rej, idx) => {
                         // Try to get product name from quotes if available
                         const productName = data.quotes?.find(q => q.sku === rej.sku)?.name || rej.sku;
-                        const displayReason = rej.reason === 'Over budget with selected items' ? "Doesn't fit bundle budget" : rej.reason;
+                        const displayReason = rej.reason === 'Over budget with selected items' ? "Over budget" : rej.reason;
                         return (
                           <li key={idx} style={{ padding: '8px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', marginBottom: '8px', fontSize: '14px', color: '#334155' }}>
                             <strong>{productName}</strong>: {displayReason}
@@ -1581,7 +1638,7 @@ class SuccessPageErrorBoundary extends React.Component {
               <p style={{ color: '#94A3B8', fontSize: '14px', marginTop: '12px' }}>Order details could not be displayed due to an error.</p>
             </div>
           </div>
-          <button onClick={() => window.location.href = '/'} className="btn btn-primary">Back to Home</button>
+          <button onClick={() => { window.scrollTo(0, 0); window.location.href = '/'; }} className="btn btn-primary">Back to Home</button>
           <footer className="footer">
             Built for the PayPal AI Hackathon 2026
           </footer>
@@ -1603,6 +1660,8 @@ function SuccessPage() {
   const gridRef = useRef();
   const navigate = useNavigate();
   const hasCaptured = useRef(false);
+  const [copiedId, setCopiedId] = useState(null);
+const [toastMessage, setToastMessage] = useState(null);
 
   // Load orders from client-side storage on mount
   useEffect(() => {
@@ -1694,11 +1753,25 @@ function SuccessPage() {
   if (loading) {
     return (
       <div className="app success-page">
-        <svg className="spinner-icon" width={48} height={48} fill="none" viewBox="0 0 24 24" stroke="#22a06b" strokeWidth={2} style={{ margin: '0 auto 24px', display: 'block' }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        <h2 style={{ color: '#FFFFFF', fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Processing Payment...</h2>
-        <p style={{ color: '#BBD0F5', fontSize: '16px' }}>Please wait while we confirm your order.</p>
+        <div className="dot-grid" />
+        <Header />
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          minHeight: 'calc(100vh - 200px)',
+          paddingTop: '72px'
+        }}>
+          <svg className="spinner-icon" width={48} height={48} fill="none" viewBox="0 0 24 24" stroke="#22a06b" strokeWidth={2} style={{ margin: '0 auto 24px', display: 'block' }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <h2 style={{ color: '#FFFFFF', fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Processing Payment...</h2>
+          <p style={{ color: '#BBD0F5', fontSize: '16px' }}>Please wait while we confirm your order.</p>
+        </div>
+        <footer className="footer">
+          Built for the PayPal AI Hackathon 2026
+        </footer>
       </div>
     );
   }
@@ -1708,13 +1781,12 @@ function SuccessPage() {
       <div className="app success-page">
         <h2 style={{ color: '#FFFFFF', fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Payment Error</h2>
         <div className="notice notice-error" style={{ maxWidth: '500px', margin: '24px auto' }}>{error}</div>
-        <button onClick={() => navigate('/')} className="btn btn-primary">Back to Home</button>
+        <button onClick={() => { window.scrollTo(0, 0); navigate('/'); }} className="btn btn-primary">Back to Home</button>
       </div>
     );
   }
 
-  const [copiedId, setCopiedId] = useState(null);
-  const [toastMessage, setToastMessage] = useState(null);
+ 
 
   const orderHistoryColumnDefs = [
     { 
@@ -1735,7 +1807,7 @@ function SuccessPage() {
       suppressHeaderMenuButton: true,
       cellStyle: { textAlign: 'left' },
       headerClass: 'ag-left-aligned-header',
-      width: 200,
+      width: 250,
       cellRenderer: params => {
         if (!params.value) return '—';
         const isCopied = copiedId === params.value;
@@ -1923,15 +1995,15 @@ function SuccessPage() {
 
       <div className="card grid-card">
         <div className="grid-header">
-          <h2>Order History</h2>
+          <h2>This Order</h2>
         </div>
         {toastMessage && (
           <div style={{
             position: 'fixed',
-            bottom: '80px',
+            bottom: '100px',
             left: '50%',
             transform: 'translateX(-50%)',
-            background: '#10B981',
+            background: '#22a06b',
             color: 'white',
             padding: '8px 16px',
             borderRadius: '8px',
@@ -1943,27 +2015,98 @@ function SuccessPage() {
             {toastMessage}
           </div>
         )}
-        {orders.length === 0 ? (
-          <div className="card-body" style={{ textAlign: 'center', padding: '48px 24px' }}>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '16px' }}>No completed orders yet</p>
-          </div>
-        ) : (
-          <div className="ag-theme-quartz aurora-dark grid-container">
-            <AgGridReact
-              ref={gridRef}
-              rowData={orders}
-              columnDefs={orderHistoryColumnDefs}
-              defaultColDef={{
-                sortable: true,
-                filter: true,
-                resizable: true,
-                flex: 1,
-                minWidth: 100
-              }}
-              domLayout='autoHeight'
-            />
-          </div>
-        )}
+        {(() => {
+          const currentOrder = orders.find(order => order.orderId === orderData.orderId);
+          
+          if (!currentOrder) {
+            return (
+              <div className="card-body" style={{ textAlign: 'center', padding: '48px 24px' }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '16px' }}>Order details not found.</p>
+              </div>
+            );
+          }
+          
+          return (
+            <div style={{ padding: '0' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ background: 'var(--grid-header-bg)', borderBottom: '1px solid var(--border-color)' }}>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>Order ID</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>Capture ID</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>Date</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>Total</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>Status</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>Items</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.orderId || '—'}</td>
+                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span 
+                          title={currentOrder.captureId || '—'}
+                          style={{ 
+                            overflow: 'hidden', 
+                            textOverflow: 'ellipsis', 
+                            whiteSpace: 'nowrap',
+                            cursor: 'help'
+                          }}
+                        >
+                          {currentOrder.captureId || '—'}
+                        </span>
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(currentOrder.captureId);
+                            setCopiedId(currentOrder.captureId);
+                            setToastMessage('Copied!');
+                            setTimeout(() => {
+                              setCopiedId(null);
+                              setToastMessage(null);
+                            }, 2000);
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#64748b',
+                            padding: '2px',
+                            fontSize: '12px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          title="Copy ID"
+                        >
+                          {copiedId === currentOrder.captureId ? (
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : (
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.createdAt ? formatDate(currentOrder.createdAt) : '—'}</td>
+                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.totalAmount ? formatMoney(currentOrder.totalAmount) : '—'}</td>
+                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.status === 'CREATED' ? 'Not paid' : (currentOrder.status || '—')}</td>
+                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>
+                      {(() => {
+                        const itemCount = currentOrder.itemCount || (currentOrder.items ? currentOrder.items.length : 0);
+                        const unitCount = currentOrder.unitCount || 0;
+                        if (itemCount === 0 && unitCount === 0) return '—';
+                        if (unitCount === 0 || unitCount === undefined) return `${itemCount} product${itemCount !== 1 ? 's' : ''}`;
+                        return `${itemCount} product${itemCount !== 1 ? 's' : ''} (${unitCount} unit${unitCount !== 1 ? 's' : ''})`;
+                      })()}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
         {orders.length > 0 && (
           <div style={{ padding: '12px 24px', textAlign: 'center' }}>
             <button
@@ -1989,7 +2132,7 @@ function SuccessPage() {
         )}
       </div>
 
-      <button onClick={() => navigate('/')} className="btn btn-primary" style={{ marginTop: '24px' }}>
+      <button onClick={() => { window.scrollTo(0, 0); navigate('/'); }} className="btn btn-primary" style={{ marginTop: '24px' }}>
         Back to Home
       </button>
 
@@ -2013,7 +2156,7 @@ function CancelPage() {
           <p style={{ color: '#BBD0F5', fontSize: '16px' }}>Your payment was cancelled. No charges were made.</p>
         </div>
       </div>
-      <button onClick={() => navigate('/')} className="btn btn-primary">Back to Home</button>
+      <button onClick={() => { window.scrollTo(0, 0); navigate('/'); }} className="btn btn-primary">Back to Home</button>
       <footer className="footer">
         Built for the PayPal AI Hackathon 2026
       </footer>
