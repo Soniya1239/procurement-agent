@@ -146,17 +146,48 @@ export async function parseCommand(text, useSampleData = false, onStep) {
   // Sample data fallback for demo purposes
   if (useSampleData) {
     emitStep('Using sample data (skipping LLM)');
-    const sampleParsed = {
-      budget: 500,
-      currency: 'USD',
-      items: [
-        { category: 'mechanical_keyboard', quantity: 5 },
-        { category: 'wireless_mouse', quantity: 5 }
-      ],
-      minRating: 3.5
-    };
+    
+    // Parse the command to determine which preset to use
+    const lowerText = text.toLowerCase();
+    const hasMouse = /mouse|mice/i.test(text);
+    const hasKeyboard = /keyboard/i.test(text);
+    let sampleParsed;
+    
+    if (hasMouse && !hasKeyboard) {
+      // Wireless mice preset
+      sampleParsed = {
+        budget: 200,
+        currency: 'USD',
+        items: [
+          { category: 'wireless_mouse', quantity: 5 }
+        ],
+        minRating: 3.5
+      };
+    } else if (hasKeyboard && !hasMouse) {
+      // Mechanical keyboards preset
+      sampleParsed = {
+        budget: 300,
+        currency: 'USD',
+        items: [
+          { category: 'mechanical_keyboard', quantity: 5 }
+        ],
+        minRating: 3.5
+      };
+    } else {
+      // Default: both keyboards and mice (or neither)
+      sampleParsed = {
+        budget: 500,
+        currency: 'USD',
+        items: [
+          { category: 'mechanical_keyboard', quantity: 5 },
+          { category: 'wireless_mouse', quantity: 5 }
+        ],
+        minRating: 3.5
+      };
+    }
+    
     const validated = ParsedCommandSchema.parse(sampleParsed);
-    emitStep(`Parsed: budget $${validated.budget}, ${validated.items.length} item types (sample data)`);
+    emitStep(`Parsed: budget $${validated.budget}, ${validated.items.length} item type${validated.items.length !== 1 ? 's' : ''} (sample data)`);
     return { parsed: validated, steps, usedFallback: true };
   }
 
@@ -394,9 +425,21 @@ Return ONLY valid JSON, no other text.`;
 function parseWithRegex(text) {
   const lowerText = text.toLowerCase();
   
-  // Extract budget
-  const budgetMatch = text.match(/\$?(\d+(?:,\d+)*(?:\.\d+)?)/);
-  const budget = budgetMatch ? parseFloat(budgetMatch[1].replace(/,/g, '')) : 500;
+  // Extract budget - look for budget-related keywords
+  const budgetPatterns = [
+    /(?:under|below|within|budget|total|limit|maximum|max)\s*\$?(\d+(?:,\d+)*(?:\.\d+)?)/i,
+    /\$?(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:budget|total|limit|maximum|max)/i,
+    /\$?(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:under|below)/i
+  ];
+  
+  let budget = 500; // default
+  for (const pattern of budgetPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      budget = parseFloat(match[1].replace(/,/g, ''));
+      break;
+    }
+  }
   
   // Extract quantities for keyboards
   const keyboardMatch = lowerText.match(/(\d+)\s*(?:mechanical\s*)?keyboard/);

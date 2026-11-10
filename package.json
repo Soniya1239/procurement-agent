@@ -1,0 +1,13 @@
+{
+  "name": "procureai",
+  "version": "1.0.0",
+  "description": "Autonomous procurement agent for PayPal AI Hackathon 2026",
+  "scripts": {
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "build": "cd client && npm run build",
+    "start": "cd server && npm start"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

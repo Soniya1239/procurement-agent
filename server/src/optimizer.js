@@ -55,6 +55,16 @@ export function choosePlan(parsed, quotes) {
 
   generateCombination(0, []);
 
+  // If no combinations generated (e.g., no quotes for a category), return error
+  if (combinations.length === 0) {
+    return {
+      best: null,
+      alternatives: [],
+      rejected,
+      error: 'No valid quotes found for requested items'
+    };
+  }
+
   // Evaluate each combination
   const evaluated = combinations.map(combination => {
     const itemsTotalCents = Math.round(combination.reduce((sum, q) => sum + q.lineTotal, 0) * 100);

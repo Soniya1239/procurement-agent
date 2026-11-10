@@ -27,8 +27,7 @@ const formatDate = (dateString) => {
     year: 'numeric', 
     hour: 'numeric', 
     minute: '2-digit',
-    hour12: true,
-    timeZone: 'America/New_York'
+    hour12: true
   });
 };
 
@@ -611,6 +610,7 @@ function InsightTile({ explanation, explanationSource, plan, useSampleData }) {
   const isAI = explanationSource === 'llm' || explanationSource === 'fallback-model';
   const isCache = explanationSource === 'cache';
   const isTemplate = explanationSource === 'template';
+  const hasError = plan?.error;
 
   return (
     <div className="bento-tile insight-tile">
@@ -629,12 +629,12 @@ function InsightTile({ explanation, explanationSource, plan, useSampleData }) {
         </div>
       </div>
       <div className="insight-tile-content">
-        {typeof explanation === 'string' ? explanation : explanation?.text}
+        {hasError ? 'No bundle fits this budget. Try raising your budget or lowering quantities.' : (typeof explanation === 'string' ? explanation : explanation?.text)}
       </div>
-      {useSampleData && (
+      {useSampleData && !hasError && (
         <div className="notice notice-info">Sample data mode: LLM parsing skipped</div>
       )}
-      {!useSampleData && explanationSource === 'template' && (
+      {!useSampleData && explanationSource === 'template' && !hasError && (
         <div className="notice notice-warning">Using fallback mode due to LLM unavailability</div>
       )}
     </div>
@@ -642,7 +642,7 @@ function InsightTile({ explanation, explanationSource, plan, useSampleData }) {
 }
 
 // Live Agent Console Component
-function AgentConsole({ steps, loading, parseSource, explainSource }) {
+function AgentConsole({ steps, loading, parseSource, explainSource, data }) {
   const consoleRef = useRef(null);
   const [processingStep, setProcessingStep] = useState(null);
 
@@ -753,7 +753,7 @@ function AgentConsole({ steps, loading, parseSource, explainSource }) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
               <span className="console-message done">
-                Waiting for human approval
+                {data?.plan?.error ? 'No bundle found within budget' : 'Waiting for human approval'}
               </span>
             </div>
           )}
@@ -822,7 +822,7 @@ function ProcurementPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
       
-      const response = await fetch('http://localhost:3001/api/agent/stream', {
+      const response = await fetch('/api/agent/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command, useSampleData }),
@@ -937,8 +937,8 @@ function ProcurementPage() {
     setError(null);
 
     try {
-      console.log('Sending checkout request to http://localhost:3001/api/checkout');
-      const response = await fetch('http://localhost:3001/api/checkout', {
+      console.log('Sending checkout request to /api/checkout');
+      const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan: data.plan })
@@ -1297,26 +1297,38 @@ function ProcurementPage() {
               />
               <div className="command-chips">
                 <button 
-                  className={`command-chip ${useSampleData ? 'disabled' : ''}`} 
-                  onClick={() => setCommand('We have a $500 budget. Find 5 mechanical keyboards and 5 wireless mice from our approved vendors.')} 
-                  disabled={loading || useSampleData}
-                  style={useSampleData ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
+                  className="command-chip" 
+                  onClick={() => {
+                    setCommand('We have a $500 budget. Find 5 mechanical keyboards and 5 wireless mice from our approved vendors.');
+                    if (useSampleData) {
+                      setIsStale(true);
+                    }
+                  }} 
+                  disabled={loading}
                 >
                   Mechanical keyboards + mice
                 </button>
                 <button 
-                  className={`command-chip ${useSampleData ? 'disabled' : ''}`} 
-                  onClick={() => setCommand('Need 10 wireless mice with a $200 budget from approved vendors.')} 
-                  disabled={loading || useSampleData}
-                  style={useSampleData ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
+                  className="command-chip" 
+                  onClick={() => {
+                    setCommand('Need 5 wireless mice with a $200 budget from approved vendors.');
+                    if (useSampleData) {
+                      setIsStale(true);
+                    }
+                  }} 
+                  disabled={loading}
                 >
                   Wireless mice
                 </button>
                 <button 
-                  className={`command-chip ${useSampleData ? 'disabled' : ''}`} 
-                  onClick={() => setCommand('Looking for 3 mechanical keyboards under $300 total from approved vendors.')} 
-                  disabled={loading || useSampleData}
-                  style={useSampleData ? { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
+                  className="command-chip" 
+                  onClick={() => {
+                    setCommand('Looking for 5 mechanical keyboards under $300 total from approved vendors.');
+                    if (useSampleData) {
+                      setIsStale(true);
+                    }
+                  }} 
+                  disabled={loading}
                 >
                   Mechanical keyboards
                 </button>
@@ -1341,7 +1353,7 @@ function ProcurementPage() {
                   />
                   <label htmlFor="sampleData">Use sample data</label>
                   {useSampleData && (
-                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Sample mode uses the default command</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Sample mode uses preset requests (no AI call)</div>
                   )}
                 </div>
                 <button
@@ -1366,6 +1378,7 @@ function ProcurementPage() {
             loading={loading}
             parseSource={data?.explanationSource}
             explainSource={data?.usedFallback ? 'Fallback' : 'AI'}
+            data={data}
           />
         </div>
       </div>
@@ -1538,11 +1551,11 @@ function ProcurementPage() {
 
           {data.plan?.error && (
             <div className="results-section">
-              <div className="card">
-                <div className="card-body">
-                  <h3 style={{ color: 'var(--red)' }}>No Valid Bundle Found</h3>
-                  <p style={{ color: 'var(--text-secondary)' }}>{data.plan.error}</p>
-                </div>
+              <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔍</div>
+                <h3 style={{ color: 'var(--text)', marginBottom: '8px' }}>No bundle fits this budget</h3>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>{data.plan.error}</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Try raising your budget or lowering the quantities.</p>
               </div>
             </div>
           )}
@@ -1706,7 +1719,7 @@ const [toastMessage, setToastMessage] = useState(null);
       sessionStorage.setItem(sessionKey, 'true');
 
       try {
-        const captureResponse = await fetch(`http://localhost:3001/api/capture/${token}`, {
+        const captureResponse = await fetch(`/api/capture/${token}`, {
           method: 'POST',
           headers: {}
         });
@@ -2041,8 +2054,8 @@ const [toastMessage, setToastMessage] = useState(null);
                 </thead>
                 <tbody>
                   <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.orderId || '—'}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>
+                    <td style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-primary)' }}>{currentOrder.orderId || '—'}</td>
+                    <td style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-primary)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span 
                           title={currentOrder.captureId || '—'}
@@ -2089,10 +2102,10 @@ const [toastMessage, setToastMessage] = useState(null);
                         </button>
                       </div>
                     </td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.createdAt ? formatDate(currentOrder.createdAt) : '—'}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.totalAmount ? formatMoney(currentOrder.totalAmount) : '—'}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{currentOrder.status === 'CREATED' ? 'Not paid' : (currentOrder.status || '—')}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>
+                    <td style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-primary)' }}>{currentOrder.createdAt ? formatDate(currentOrder.createdAt) : '—'}</td>
+                    <td style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-primary)' }}>{currentOrder.totalAmount ? formatMoney(currentOrder.totalAmount) : '—'}</td>
+                    <td style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-primary)' }}>{currentOrder.status === 'CREATED' ? 'Not paid' : (currentOrder.status || '—')}</td>
+                    <td style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-primary)' }}>
                       {(() => {
                         const itemCount = currentOrder.itemCount || (currentOrder.items ? currentOrder.items.length : 0);
                         const unitCount = currentOrder.unitCount || 0;

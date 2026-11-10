@@ -387,6 +387,23 @@ app.post('/api/orders/clear', (req, res) => {
   res.json({ success: true, message: 'Order history cleared', cleared: initialLength - orders.length });
 });
 
+// Serve static files from client/dist in production
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.join(__dirname, '..', '..', 'client', 'dist');
+  
+  // Only serve static files if dist directory exists
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    
+    // SPA routing: serve index.html for all non-API routes
+    app.get('*', (req, res) => {
+      if (!req.path.startsWith('/api')) {
+        res.sendFile(path.join(distPath, 'index.html'));
+      }
+    });
+  }
+}
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
