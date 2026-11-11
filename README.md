@@ -4,7 +4,7 @@ An autonomous procurement agent built for the PayPal AI Hackathon 2026. ProcureA
 
 Live demo: https://procurement-agent-hxhy.onrender.com
 
-Demo video: (coming soon)
+Demo video: https://youtu.be/cT8gjpHKEbY
 
 **Note**: Runs on a free Render plan, so the first load can take up to 50 seconds. PayPal SANDBOX mode only—test payments, no real money.
 
